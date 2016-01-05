@@ -121,10 +121,9 @@ class MainWindow(ttk.Frame):
 
         pad_frame.bind("<Configure>", enforce_aspect_ratio)
 
-    def get_bbox(self, row, col, totalrows=9, totalcols=9, size=1):
-        """Returns a bounding box (x0, y0, x1, y1) for the square at row, col
-        in the gameboard divided into totalrows rows and totalcols columns,
-        scaled by size with the same centre point."""
+    def get_midpoint(self, row, col, totalrows=9, totalcols=9):
+        """Returns a point (x, y) at the centre of the square at row, col
+        in the gameboard divided into totalrows rows and totalcols columns."""
         sqare_nw = (
             col * self.gameboard.winfo_width() / totalcols,
             row * self.gameboard.winfo_height() / totalrows)
@@ -133,6 +132,16 @@ class MainWindow(ttk.Frame):
             self.gameboard.winfo_height() / totalrows)
         middle = (sqare_nw[0] + (dimensions[0] / 2),
                   sqare_nw[1] + (dimensions[1] / 2))
+        return middle
+
+    def get_bbox(self, row, col, totalrows=9, totalcols=9, size=1):
+        """Returns a bounding box (x0, y0, x1, y1) for the square at row, col
+        in the gameboard divided into totalrows rows and totalcols columns,
+        scaled by size with the same centre point."""
+        middle = self.get_midpoint(row, col, totalrows, totalcols)
+        dimensions = (
+            self.gameboard.winfo_width() / totalcols,
+            self.gameboard.winfo_height() / totalrows)
         bbox = (
             middle[0] - (dimensions[0] * size * 0.5),
             middle[1] - (dimensions[1] * size * 0.5),
@@ -217,12 +226,23 @@ class MainWindow(ttk.Frame):
     def clear_overlapping(self, x0, y0, x1, y1, exclude_tags=("grid",)):
         """Deletes all itesm on the gameboard overlapping the square
         x0, y0, x1, y1 except those tagged with at least one of the exclude_tags"""
-        self.clear_square("overlapping", x0, y0, x1, y1, exclude_tags)
+        return self.clear_square("overlapping", x0, y0, x1, y1, exclude_tags)
 
     def clear_enclosed(self, x0, y0, x1, y1, exclude_tags=("grid",)):
         """Deletes all itesm on the gameboard enclosed by the square
         x0, y0, x1, y1 except those tagged with at least one of the exclude_tags"""
-        self.clear_square("enclosed", x0, y0, x1, y1, exclude_tags)
+        return self.clear_square("enclosed", x0, y0, x1, y1, exclude_tags)
+
+    def clear_board(self, exclude_tags=("grid",)):
+        """Deletes all itesm on the gameboard except those tagged with at least
+        one of the exclude_tags"""
+        return self.clear_square(
+            "overlapping",
+            0,
+            0,
+            self.gameboard.winfo_width(),
+            self.gameboard.winfo_height(),
+            exclude_tags)
 
     def get_square(self, x, y, totalrows=9, totalcols=9):
         """Returns the (row, col) on the gameboard, divided into totalrows rows
@@ -238,44 +258,85 @@ class MainWindow(ttk.Frame):
                     raise self.OnGridException()
         return (row, col)
 
-    def make_onclick(self):
-        """Returns a callback function for clicks on the gameboard"""
-        def onclick(e):
-            try:
-                (row, col) = self.get_square(e.x, e.y)
-                (outer_row, outer_col, inner_row, inner_col) = (row // 3, col // 3, row % 3, col % 3)
-                self.game.play((outer_row, outer_col), (inner_row, inner_col))
-                self.set_status("Played at ({}, {}), ({}, {})".format(outer_row, outer_col, inner_row, inner_col))
+    def gameboard_onclick(self, e):
+        """The callback for clicks on the gameboard.
+        Calls Game.play() at the appropriate place, and returns feedback to
+        the user."""
+        try:
+            (row, col) = self.get_square(e.x, e.y)
+            (outer_row, outer_col, inner_row, inner_col) = (row // 3, col // 3, row % 3, col % 3)
+            self.game.play((outer_row, outer_col), (inner_row, inner_col))
+            # self.set_status("Played at ({}, {}), ({}, {})".format(outer_row, outer_col, inner_row, inner_col))
 
-                # That self.game.play has changed self.game.active_player
-                if self.game.active_player.value == game.SquareState.X.value:
-                    self.draw_o(row, col)
-                else:
-                    self.draw_x(row, col)
+            # That self.game.play(...) has changed self.game.active_player so
+            # this is backwards
+            if self.game.active_player == game.SquareState.X:
+                self.draw_o(row, col)
+            else:
+                self.draw_x(row, col)
 
-                #square_bb = self.get_bbox(row, col)
-                #self.clear_enclosed(
-                #    square_bb[0],
-                #    square_bb[1],
-                #    square_bb[2],
-                #    square_bb[3])
-                #debug_text = "Click at ({}, {}), which is in row {} column {}".format(
-                #    e.x, e.y, row, col)
-                #draw_x(e.widget, 0, 0, 3, 3, 10, 0.75)
-                #draw_o(e.widget, 1, 1, 3, 3, 10, 0.75)
-                #if random.choice('xo') == 'x':
-                #    self.draw_x(row, col)
-                #    self.set_status("X played. {}".format(debug_text))
-                #else:
-                #    self.draw_o(row, col)
-                #    self.set_status("O played. {}".format(debug_text))
-            except game.InvalidMoveException:
-                self.set_status("({}, {}), ({}, {}) is an invalid move".format(outer_row, outer_col, inner_row, inner_col))
-            except self.OnGridException:
-                self.set_status(
-                    "Click at ({}, {}), which is on a border".format(
-                        e.x, e.y))
-        return onclick
+            if self.game.child_win is not None:
+                self.game_onchildwin(self.game.child_win[0], self.game.child_win[1])
+                self.game.child_win = None
+
+            if self.game.overall_win is not None:
+                self.show_available_boards(())
+            else:
+                self.show_available_boards(self.game.available_boards())
+
+        except game.InvalidMoveException:
+            self.set_status("({}, {}), ({}, {}) is an invalid move".format(outer_row, outer_col, inner_row, inner_col))
+
+        except self.OnGridException:
+            pass
+
+    def game_onchildwin(self, board, player):
+        """Called when a child board is won"""
+
+        # Draw a line through the winning location
+        winning_line = self.game.main_board[board].child.winning_line
+        start_delta = self.get_midpoint(winning_line[0][0], winning_line[0][1])
+        end_delta = self.get_midpoint(winning_line[1][0], winning_line[1][1])
+        start_point = self.get_bbox(board[0], board[1], 3, 3)
+        line = (
+                start_point[0] + start_delta[0],
+                start_point[1] + start_delta[1],
+                start_point[0] + end_delta[0],
+                start_point[1] + end_delta[1])
+        extension = (
+                1.1 * (line[2] - line[0]) / 8,
+                1.1 * (line[3] - line[1]) / 8)
+        self.gameboard.create_line(
+            line[0] - extension[0],
+            line[1] - extension[1],
+            line[2] + extension[0],
+            line[3] + extension[1],
+            fill="black",
+            width=5,
+            capstyle=tkinter.ROUND,
+            tag=("resize",))
+
+        # Draw a big X or O over the square they won
+        if player == game.SquareState.X:
+            self.draw_x(board[0], board[1], 3, 3, 10, 0.75)
+        else:
+            self.draw_o(board[0], board[1], 3, 3, 10, 0.75)
+
+    def show_available_boards(self, available_boards):
+        self.gameboard.delete("available")
+        for b in available_boards:
+            bbox = self.get_bbox(b[0], b[1], 3, 3)
+            self.gameboard.create_rectangle(
+                bbox[0],
+                bbox[1],
+                bbox[2],
+                bbox[3],
+                fill="yellow",
+                width=0,
+                stipple="gray12",
+                tags=("resize", "available")
+                )
+        self.gameboard.tag_lower("available", "grid")
 
     def set_status(self, t):
         self.infoframe.status.config(text=t)
@@ -283,14 +344,14 @@ class MainWindow(ttk.Frame):
     def make_infoframe(self):
         self.infoframe = ttk.Frame(self, padding=0)
 
-    def start_game(self):
-        if "" == self.infoframe.X_name.get().strip():
-            self.infoframe.X_name.set("X")
-        if "" == self.infoframe.O_name.get().strip():
-            self.infoframe.O_name.set("O")
-        self.infoframe.X_entry.config(state=tkinter.DISABLED)
-        self.infoframe.O_entry.config(state=tkinter.DISABLED)
-        self.set_status("{} to play".format(self.game.active_player.name))
+    # def start_game(self):
+    #     if "" == self.infoframe.X_name.get().strip():
+    #         self.infoframe.X_name.set("X")
+    #     if "" == self.infoframe.O_name.get().strip():
+    #         self.infoframe.O_name.set("O")
+    #     self.infoframe.X_entry.config(state=tkinter.DISABLED)
+    #     self.infoframe.O_entry.config(state=tkinter.DISABLED)
+    #     self.set_status("{} to play".format(self.game.active_player.name))
 
     def __init__(self, parent, game, *args, **kwargs):
         ttk.Frame.__init__(self, parent, padding=20, *args, **kwargs)
@@ -301,9 +362,9 @@ class MainWindow(ttk.Frame):
         self.rowconfigure(0, weight=1)
         self.rowconfigure(1, weight=0)
 
-        self.infoframe = InfoFrame(self, game, start_game=self.start_game)
+        self.infoframe = InfoFrame(self, game, start_game=None) #self.start_game)
         self.infoframe.grid(column=0, row=1, sticky=(N, W, E, S))
-        
+
         # We set up an auto-resizing, fixed-aspect-ratio frame which will
         # contain our gameboard canvas
         padframe = ttk.Frame(self, padding=0)
@@ -313,11 +374,11 @@ class MainWindow(ttk.Frame):
         gameframe.columnconfigure(0, weight=1)
         gameframe.rowconfigure(0, weight=1)
         self.set_aspect(gameframe, padframe, 1)
-        
+
         # We set up an auto-resizing canvas for the gameboard
         self.gameboard = ResizingCanvas(gameframe, bg="white")
         self.gameboard.grid(column=0, row=0, sticky=(N, S, E, W))
-        
+
         # We need to update the root window to make sure we have the right
         # dimensions before we can draw the grids
         self.parent.update()
@@ -330,12 +391,23 @@ class MainWindow(ttk.Frame):
                 "minor-grid",
             ))
         self.draw_grid(tags=("major-grid",))
-        
-        # Now we create the click binding for the gameboard
-        self.gameboard.bind("<Button-1>", self.make_onclick())
+
+        # Create the click binding for the gameboard
+        self.gameboard.bind("<Button-1>", self.gameboard_onclick)
+
+        # Highlight all available boards
+        self.show_available_boards(self.game.available_boards())
+
+        # Display status
+        def log_func(status):
+            self.set_status(status)
+        self.game.add_log_function(log_func)
+
+        # Set status
+        self.set_status("{} to play".format(self.game.active_player.name))
 
 class InfoFrame(tkinter.Frame):
-    
+
     def __init__(self, parent, game, start_game, *args, **kwargs):
         ttk.Frame.__init__(self, parent, *args, **kwargs)
         self.columnconfigure(1, weight=1)
@@ -347,62 +419,63 @@ class InfoFrame(tkinter.Frame):
         self.rowconfigure(3, weight=0)
         self.rowconfigure(3, weight=0)
 
-        self.status = ttk.Label(
-            self,
-            text="Please enter player names and then hit the start button.")
-        self.status.grid(
-            column=1, columnspan=3, row=1, sticky=(
-                N, S, E, W), pady=10)
-
         ttk.Separator(
             self,
             orient=tkinter.HORIZONTAL).grid(
                 column=1,
                 columnspan=3,
-                row=2,
+                row=1, #2,
                 pady=5,
                 sticky=(N, S, E, W))
 
-        self.X_name = tkinter.StringVar()
-        ttk.Label(
+        self.status = ttk.Label(
             self,
-            text="Player X:").grid(
-            column=1,
-            row=3,
-            sticky=(
-                W,
-                S))
-        self.X_entry = ttk.Entry(self, textvariable=self.X_name)
-        self.X_entry.grid(column=1, row=4, sticky=(E, W, N))
+            text="Starting up...")
+        self.status.grid(
+            column=1, columnspan=3, row=2, #1,
+            sticky=(N, S, E, W), pady=10)
 
-        self.O_name = tkinter.StringVar()
-        ttk.Label(
-            self,
-            text="Player O:").grid(
-            column=3,
-            row=3,
-            sticky=(
-                W,
-                S))
-        self.O_entry = ttk.Entry(self, textvariable=self.O_name)
-        self.O_entry.grid(column=3, row=4, sticky=(E, W, N))
-
-        ttk.Button(
-            self,
-            text="Start",
-            command=start_game,
-            default=tkinter.ACTIVE).grid(
-                column=2,
-                row=4,
-                padx=10,
-                sticky=(N, S, E, W))
+        # self.X_name = tkinter.StringVar()
+        # ttk.Label(
+        #     self,
+        #     text="Player X:").grid(
+        #     column=1,
+        #     row=3,
+        #     sticky=(
+        #         W,
+        #         S))
+        # self.X_entry = ttk.Entry(self, textvariable=self.X_name)
+        # self.X_entry.grid(column=1, row=4, sticky=(E, W, N))
+        #
+        # self.O_name = tkinter.StringVar()
+        # ttk.Label(
+        #     self,
+        #     text="Player O:").grid(
+        #     column=3,
+        #     row=3,
+        #     sticky=(
+        #         W,
+        #         S))
+        # self.O_entry = ttk.Entry(self, textvariable=self.O_name)
+        # self.O_entry.grid(column=3, row=4, sticky=(E, W, N))
+        #
+        # ttk.Button(
+        #     self,
+        #     text="Start",
+        #     command=start_game,
+        #     default=tkinter.ACTIVE).grid(
+        #         column=2,
+        #         row=4,
+        #         padx=10,
+        #         sticky=(N, S, E, W))
 
 class MainMenu(tkinter.Menu):
 
-    def __init__(self, root, game, *args, **kwargs):
+    def __init__(self, root, game, main_window, *args, **kwargs):
         tkinter.Menu.__init__(self, root, *args, **kwargs)
         self.root = root
         self.game = game
+        self.main_window = main_window
 
         gamemenu = tkinter.Menu(self, tearoff=0)
         gamemenu.add_command(
@@ -412,12 +485,12 @@ class MainMenu(tkinter.Menu):
             accelerator="Ctrl+N")
         root.bind_all("<Control-n>", self.new_game)
 
-        gamemenu.add_command(
-            label="Undo",
-            command=self.undo,
-            underline=0,
-            accelerator="Ctrl+Z")
-        root.bind_all("<Control-z>", self.undo)
+        # gamemenu.add_command(
+        #     label="Undo",
+        #     command=self.undo,
+        #     underline=0,
+        #     accelerator="Ctrl+Z")
+        # root.bind_all("<Control-z>", self.undo)
 
         gamemenu.add_separator()
         gamemenu.add_command(label="Exit", command=self.exit, underline=1)
@@ -429,19 +502,32 @@ class MainMenu(tkinter.Menu):
         self.add_cascade(label="Help", menu=helpmenu, underline=0)
 
     def new_game(self, e=None):
-        print("New game: {}".format(e))
-        pass
+        confirm = messagebox.askquestion(
+            "New game",
+            "Are you sure you want to start a new game?",
+            icon="warning")
+        if "yes" == confirm:
+            self.main_window.clear_board()
+            g = game.Game()
+            self.main_window.game = g
+            self.game = g
 
     def undo(self, e=None):
         print("Undo: {}".format(e))
         pass
 
     def exit(self, e=None):
-        exit(0)
+        confirm = messagebox.askquestion(
+            "Quit",
+            "Are you sure you want to quit?",
+            icon="warning")
+        if "yes" == confirm:
+            exit(0)
 
     def about(self, e=None):
-        print("About: {}".format(e))
-        pass
+        confirm = messagebox.showinfo(
+            "About",
+            "An ultimate noughts and crosses game by Michael Cordover. Version 1.0 (January 2016). MIT licence.",)
 
 if __name__ == "__main__":
     root = tkinter.Tk()
@@ -451,8 +537,9 @@ if __name__ == "__main__":
 
     g = game.Game()
 
-    MainWindow(root, g).grid(column=0, row=0, sticky=(N, W, E, S))
-    root.config(menu=MainMenu(root, g))
+    main_window = MainWindow(root, g)
+    main_window.grid(column=0, row=0, sticky=(N, W, E, S))
+    root.config(menu=MainMenu(root, g, main_window))
 
     root.update()
     root.minsize(root.winfo_width(), root.winfo_height())

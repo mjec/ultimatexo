@@ -1,33 +1,36 @@
 #!/usr/bin/python
 
 from enum import Enum
-from copy import deepcopy as copy
+from copy import copy
 import random
 
 class InvalidMoveException(Exception):
     pass
 
 class SquareState(Enum):
-    _ = 0  # Alias for empty
-    empty = 0
+    _ = 0
+    empty = 0  # Alias of _
     X = 1
     x = 1  # alias of X
     O = 2
     o = 2  # alias of O
 
+    def __str__(self):
+        return self.name
+
 class Square(object):
     child = None
     state = SquareState['empty']
-    
+
     def __eq__(self, other):
         if isinstance(other, SquareState):
-            return self.state.value == other.value
+            return self.state == other
         else:
-            return self.state.value == other.state.value
+            return self.state == other.state
 
     def __str__(self):
         return self.state.name
-    
+
 class Board(object):
     parent = None
     _index = 0
@@ -44,7 +47,9 @@ class Board(object):
         self.bl = Square()  # Bottom left
         self.bc = Square()  # Bottom centre
         self.br = Square()  # Bottom right
-        if not parent is None:
+        # It would probably be better to use a 2D array, but ¯\_(ツ)_/¯
+        # This was a deliberate decision, to make winner() easier to read
+        if parent is not None:
             self.parent = parent
 
     def __iter__(self):
@@ -56,7 +61,6 @@ class Board(object):
         if i < 9:
             return self.square(i // 3, i % 3)
         else:
-            self._index = 0
             raise StopIteration
 
     def __getitem__(self, key):
@@ -83,6 +87,7 @@ class Board(object):
         # Note that we do NOT set item.child = None
 
     def square(self, row, col):
+        """Returns the square at the relevant row, col"""
         if 0 == row:
             if 0 == col:
                 return self.tl
@@ -106,9 +111,21 @@ class Board(object):
                 return self.br
         raise TypeError(
             "No such (row, column) pair: each must be in range 0-2 inclusive")
-    
+
     @staticmethod
-    def square_name(row, col):
+    def square_name(row_or_tuple, col=None):
+        """Returns a human readable name of the square at row, col"""
+
+        if col is None:
+            # Then row_or_tuple should be a tuple
+            try:
+                row = row_or_tuple[0]
+                col = row_or_tuple[1]
+            except TypeError:
+                raise ValueError("Row and column both required unless")
+        else:
+            row = row_or_tuple
+
         if 0 == row:
             if 0 == col:
                 return "top left"
@@ -132,14 +149,18 @@ class Board(object):
                 return "bottom right"
         raise TypeError(
             "No such (row, column) pair: each must be in range 0-2 inclusive")
-        
-    @property
+
     def winner(self):
         """Returns the winner of this board (a SquareState value, which will
         be SquareState.empty if the board is a draw) or None if the board is
         not yet finalized."""
-        if not (self._winner is None):
+        if self._winner is not None:
             return self._winner
+
+        # It is possible for multiple wins to exist, in which case the winning_line
+        # will be whatever gets set last. This doesn't *really* matter but it
+        # kind of matters.
+
         if self.tl != SquareState.empty:
             if self.tl == self.tc == self.tr:
                 self.winning_line = ((0,0), (0,2))
@@ -167,7 +188,8 @@ class Board(object):
             if self.mc == self.tc == self.bc:
                 self.winning_line = ((0,1), (2,1))
                 self._winner = self.mc.state
-        else:
+
+        if self._winner is None:
             # Nobody has won, but we assume we can't play
             self._winner = SquareState['empty']
             for square in self:
@@ -175,6 +197,7 @@ class Board(object):
                     # There is at least one empty square, so board is still active
                     self._winner = None
                     break
+
         return self._winner
 
     def __str__(self):
@@ -188,105 +211,93 @@ class Board(object):
             s = "{}{}".format(s, a)
         return s
 
-
 class Game(object):
     last_move = None
     _log_functions = []
-    _won_child_functions = []
-    _won_overall_functions = []
+    child_win = None
+    overall_win = None
 
     def __init__(self, starting_player=None):
         self.main_board = Board()
+
         for i in range(3):
             for j in range(3):
-                self.main_board[(i,j)].child = Board(self.main_board)
-        
+                self.main_board[(i, j)].child = Board(self.main_board)
+
         if starting_player is None:
             if random.choice('xo') == 'x':
                 self.active_player = SquareState['X']
             else:
                 self.active_player = SquareState['O']
         else:
+            try:
+                if starting_player.lower() in ('x', 'o'):
+                    starting_player = SquareState[starting_player]
+            except:
+                if starting_player != SquareState.X and starting_player != SquareState.O:
+                    raise ValueError("The starting_player must be SquareState.X or SquareState.O")
             self.active_player = starting_player
-        
-        if (not isinstance(self.active_player, SquareState)) or (self.active_player != SquareState.X and self.active_player != SquareState.O):
-            raise ValueError("The starting_player must be SquareState.X or SquareState.O")
-        
+
         self.log_status("{} to play".format(self.active_player.name))
-        
+
+        # All boards start active
         self.active_boards = [(i, j) for i in range(3) for j in range(3)]
-    
+
     def add_log_function(self, fun):
         self._log_functions.append(fun)
-    
-    def add_won_child_function(self, fun):
-        self._won_child_functions.append(fun)
-    
-    def add_won_overall_function(self, fun):
-        self._won_overall_functions.append(fun)
-    
+
     def log_status(self, status):
         print(status)
         for f in self._log_functions:
             f(status)
-    
-    def _fire_won_child(self, board, player):
-        for f in self._won_child_functions:
-            f(board, player)
-        
-    def _fire_won_overall(self, player):
-        for f in self._won_overall_functions:
-            f(player)
-    
+
     def play(self, child_board, square):
-        if (not (self.main_board[child_board].child.winner is None)) or self.main_board[child_board].child[square] != SquareState.empty:
+        if (self.main_board[child_board].child.winner() is not None) or (self.main_board[child_board].child[square] != SquareState.empty) or (child_board not in self.available_boards()):
             raise InvalidMoveException
-            return
-        
-        self.main_board[(child_board[0], child_board[1])].child[(square[0], square[1])].state = SquareState[self.active_player.name]
-        
+
+        self.main_board[child_board].child[square].state = self.active_player #SquareState[self.active_player.name]
+
         self.log_status("{} played in the {} square of the {} board".format(
             self.active_player.name,
-            Board.square_name(square[0], square[1]),
-            Board.square_name(child_board[0], child_board[1])
+            Board.square_name(square),
+            Board.square_name(child_board)
             ))
-        
-        board_winner = self.main_board[child_board].child.winner
-        if not board_winner is None:
-            self.main_board[(child_board[0], child_board[1])].state = self.active_player
+
+        board_winner = self.main_board[child_board].child.winner()
+        if board_winner is not None:
+            self.main_board[child_board].state = self.active_player
             self.log_status("{} won the {} board with a line from {} to {}".format(
                 self.active_player,
-                Board.square_name(child_board[0], child_board[1]),
-                Board.square_name(self.main_board[(child_board[0], child_board[1])].child.winning_line[0][0], self.main_board[(child_board[0], child_board[1])].child.winning_line[0][1]),
-                Board.square_name(self.main_board[(child_board[0], child_board[1])].child.winning_line[1][0], self.main_board[(child_board[0], child_board[1])].child.winning_line[1][1])
+                Board.square_name(child_board),
+                Board.square_name(self.main_board[child_board].child.winning_line[0]),
+                Board.square_name(self.main_board[child_board].child.winning_line[1])
                 ))
-            self.active_boards.remove((child_board[0], child_board[1]))
-            self._fire_won_child((child_board[0], child_board[1]), self.active_player)
-        
-        board_winner = self.main_board.winner
-        if not board_winner is None:
+            self.active_boards.remove(child_board)
+            self.child_win = (child_board, self.active_player)
+
+        board_winner = self.main_board.winner()
+        if board_winner is not None:
             self.log_status("{} won the game overall with a line from {} to {}".format(
                 self.active_player,
-                Board.square_name(self.main_board.winning_line[0][0], self.main_board.winning_line[0][1]),
-                Board.square_name(self.main_board.winning_line[1][0], self.main_board.winning_line[1][1])
+                Board.square_name(self.main_board.winning_line[0]),
+                Board.square_name(self.main_board.winning_line[1])
                 ))
-            self._fire_won_overall(self.active_player)
-        
+            self.overall_win = self.active_player
+
         self.last_move = (square[0], square[1])
         if self.active_player == SquareState.X:
             self.active_player = SquareState['O']
-            self.log_status("{} to play".format(self.active_player))
+            #self.log_status("{} to play".format(self.active_player))
         elif self.active_player == SquareState.O:
             self.active_player = SquareState['X']
-            self.log_status("{} to play".format(self.active_player))
-    
+            #self.log_status("{} to play".format(self.active_player))
+
     def available_boards(self):
-        if not self.last_move is None:
-            if self.main_board[self.last_move].child.winner is None:
-                return [self.last_move]
-        
+        if self.last_move is not None and self.main_board[self.last_move].child.winner() is None:
+            return [self.last_move]
+
         for b in self.active_boards:
-            if not self.main_board[b].child.winner is None:
-                del self.active_boards[b]
-        
+            if self.main_board[b].child.winner() is not None:
+                self.active_boards.remove(b)
+
         return self.active_boards
