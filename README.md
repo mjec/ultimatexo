@@ -5,6 +5,11 @@ An ultimate noughts and crosses game.
 Because ultimate noughts and crosses is fun, and I had never built a GUI
 python application before.
 
+## How do I play?
+`python main.py`
+
+Tested with python 3 on linux.
+
 ## Shouldn't it be ultimateox?
 Shh. I still pronounce it "ultimate noughts and crosses".
 
