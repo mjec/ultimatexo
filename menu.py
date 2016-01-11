@@ -1,5 +1,6 @@
 #!/usr/bin/python
 
+import game
 import tkinter
 from tkinter import N, S, E, W, ttk, messagebox
 
