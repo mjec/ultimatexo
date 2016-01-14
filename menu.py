@@ -61,4 +61,4 @@ class MainMenu(tkinter.Menu):
     def about(self, e=None):
         confirm = messagebox.showinfo(
             "About",
-            "An ultimate noughts and crosses game by Michael Cordover. Version 1.0 (January 2016). MIT licence.",)
+            "An ultimate noughts and crosses game by Michael Cordover. Version 1.0 (January 2016). MIT licence. In honour of Ben, who taught me the game.",)

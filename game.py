@@ -217,9 +217,41 @@ class Board(object):
             s = "{}{}".format(s, a)
         return s
 
+class Player(object):
+
+    def __init__(self, token, name=None):
+        try:
+            if token.lower() in ('x', 'o'):
+                token = SquareState[token]
+        except:
+            if token != SquareState.X and token != SquareState.O:
+                raise ValueError("token must be SquareState.X or SquareState.O")
+
+        self.token = token
+
+        if name is None:
+            self.name = name
+        else:
+            self.name = token.name
+
+class Move(object):
+    def __init__(self, game, player, child_board, square):
+        self.game = game
+        self.player = player
+        self.child_board = child_board
+        self.square = square
+    
+    def __str__(self):
+        return "{} played in the {} square of the {} board".format(
+            self.player.name,
+            Board.square_name(self.square),
+            Board.square_name(self.child_board)
+            )
+
 class Game(object):
     last_move = None
     _log_functions = []
+    moves = []
     
     # child_win and overall_win are flags that should be reset after they are read
     child_win = None # if not None, a tuple (child_board, winning_player)
@@ -276,6 +308,13 @@ class Game(object):
             Board.square_name(square),
             Board.square_name(child_board)
             ))
+
+       #moves.append(Move(
+       #     self,
+       #     self.active_player,
+       #     child_board,
+       #     square
+       #     ))
         
         # Check to see if this move resulted in child_board being won
         board_winner = self.main_board[child_board].child.winner()
